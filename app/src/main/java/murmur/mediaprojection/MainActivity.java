@@ -15,7 +15,6 @@ import android.media.MediaScannerConnection;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
-import android.os.Environment;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -25,6 +24,7 @@ import android.util.Log;
 import android.view.Display;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Toast;
 
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
@@ -48,6 +48,9 @@ import io.reactivex.functions.Action;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Function;
 import io.reactivex.schedulers.Schedulers;
+
+import static android.os.Environment.DIRECTORY_PICTURES;
+import static android.os.Environment.getExternalStoragePublicDirectory;
 
 public class MainActivity extends AppCompatActivity{
     private final int MY_PERMISSIONS_REQUEST_WRITE_STORAGE = 5566;
@@ -114,7 +117,7 @@ public class MainActivity extends AppCompatActivity{
         final Point screenSize = new Point();
         final DisplayMetrics metrics = getResources().getDisplayMetrics();
         Display display = getWindowManager().getDefaultDisplay();
-        display.getSize(screenSize);
+        display.getRealSize(screenSize);
         return Flowable.create(new FlowableOnSubscribe<Image>() {
             @Override
             public void subscribe(@NonNull final FlowableEmitter<Image> emitter) throws Exception {
@@ -152,9 +155,10 @@ public class MainActivity extends AppCompatActivity{
                 Log.d("kanna", "check create filename: " + Thread.currentThread().toString());
                 String directory, fileHead, fileName;
                 int count = 0;
-                File externalFilesDir = getExternalFilesDir(null);
+                File externalFilesDir = getExternalStoragePublicDirectory(DIRECTORY_PICTURES);
                 if (externalFilesDir != null) {
-                    directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).getAbsolutePath() + "/screenshots/";
+                    directory = getExternalStoragePublicDirectory(DIRECTORY_PICTURES)
+                            .getAbsolutePath() + "/screenshots/";
 
                     Log.d("kanna", directory);
                     File storeDirectory = new File(directory);
@@ -202,13 +206,36 @@ public class MainActivity extends AppCompatActivity{
                     @Override
                     public void onScanCompleted(String s, Uri uri) {
                         Log.d("kanna", "check scan file: " + Thread.currentThread().toString());
-                        emitter.onNext("complete scan " + s);
-                        emitter.onComplete();
+                        if (uri == null) {
+                            emitter.onError(new Throwable("Scan fail" + s));
+                        }
+                        else {
+                            emitter.onNext(s);
+                            emitter.onComplete();
+                        }
                     }
                 };
                 MediaScannerConnection.scanFile(mContext, path, null, mScanListener);
             }
         },BackpressureStrategy.DROP);
+    }
+    private void finalRelease(){
+        if (mVirtualDisplay != null){
+            mVirtualDisplay.release();
+        }
+        if (mImageReader != null){
+            mImageReader = null;
+        }
+        if(mImageListener != null){
+            mImageListener = null;
+        }
+        if(mScanListener != null){
+            mScanListener = null;
+        }
+        if(mProjection != null){
+            mProjection.stop();
+            mProjection = null;
+        }
     }
 
     /*
@@ -237,28 +264,15 @@ public class MainActivity extends AppCompatActivity{
                         return updateScan(fileName);
                     }
                 })
-                .observeOn(AndroidSchedulers.mainThread())
+                .observeOn(Schedulers.io())
                 .doFinally(new Action() {
                     @Override
                     public void run() throws Exception {
-                        if (mVirtualDisplay != null){
-                            mVirtualDisplay.release();
-                        }
-                        if (mImageReader != null){
-                            mImageReader = null;
-                        }
-                        if(mImageListener != null){
-                            mImageListener = null;
-                        }
-                        if(mScanListener != null){
-                            mScanListener = null;
-                        }
-                        if(mProjection != null){
-                            mProjection.stop();
-                            mProjection = null;
-                        }
+                        Log.d("kanna", "check do finally: " + Thread.currentThread().toString());
+                        finalRelease();
                     }
                 })
+                .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(new Subscriber<String>() {
 
                     @Override
@@ -269,11 +283,14 @@ public class MainActivity extends AppCompatActivity{
                     @Override
                     public void onNext(String filename) {
                         Log.d("kanna", "onNext: " + filename);
+                        Toast.makeText(mContext, "Success: " + filename, Toast.LENGTH_SHORT).show();
                     }
 
                     @Override
                     public void onError(Throwable t) {
                         Log.w("kanna", "onError: ", t);
+                        Toast.makeText(mContext, "Error: " + t, Toast.LENGTH_SHORT).show();
+
                     }
 
                     @Override
